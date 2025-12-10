@@ -1,7 +1,7 @@
 <?php
 define('BASE_API_URL', 'http://localhost/retail-sister/server_pusat/api/');
-define('TOKO_API_KEY', 'JKT-KEY-12345');
-define('ID_TOKO', 1);
+define('TOKO_API_KEY', '030303ca251290599f55a793e1268f5c');
+define('ID_TOKO', 2);
 define('BASE_URL', 'http://localhost/pos_toko_client/public/');
 
 function callAPI($endpoint, $method = 'GET', $data = null) {

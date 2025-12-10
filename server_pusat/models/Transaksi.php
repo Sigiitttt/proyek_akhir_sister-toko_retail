@@ -1,15 +1,18 @@
 <?php
 // models/Transaksi.php
 
-class Transaksi {
+class Transaksi
+{
     private $db;
 
-    public function __construct($dbConnection) {
+    public function __construct($dbConnection)
+    {
         $this->db = $dbConnection;
     }
 
-    // [API] Simpan Transaksi dari Toko (Complex Insert)
-    public function simpanTransaksiSync($data_transaksi) {
+    // [API] Simpan Transaksi dari Toko
+    public function simpanTransaksiSync($data_transaksi)
+    {
         try {
             $this->db->beginTransaction();
 
@@ -18,22 +21,28 @@ class Transaksi {
                 $check = "SELECT id_transaksi FROM transaksi WHERE id_transaksi = :id";
                 $stmtCheck = $this->db->prepare($check);
                 $stmtCheck->execute([':id' => $trx['id_transaksi']]);
-                
-                if($stmtCheck->rowCount() > 0) continue; // Skip jika sudah ada
 
-                // 2. Insert Header
+                if ($stmtCheck->rowCount() > 0) continue; // Skip jika sudah ada
+
+                // 2. Insert Header (10 Parameter + NOW())
+                // Total ada 11 Kolom, tapi 1 kolom (waktu_sync) pakai fungsi NOW() jadi tidak butuh parameter
                 $sqlHeader = "INSERT INTO transaksi 
-                             (id_transaksi, id_toko, no_struk, total_transaksi, bayar, kembalian, waktu_transaksi, waktu_sync) 
+                             (id_transaksi, id_toko, no_struk, total_transaksi, bayar, kembalian, 
+                              metode_pembayaran, kasir_id, nama_kasir, waktu_transaksi, waktu_sync) 
                              VALUES 
-                             (:id, :idtoko, :struk, :total, :bayar, :kembali, :waktu, NOW())";
-                
+                             (:id, :idtoko, :struk, :total, :bayar, :kembali, 
+                              :metode, :kasir, :nama, :waktu, NOW())";
+
                 $this->db->prepare($sqlHeader)->execute([
                     ':id'      => $trx['id_transaksi'],
-                    ':idtoko'  => $trx['id_toko'], // Pastikan ini dari Auth Token
+                    ':idtoko'  => $trx['id_toko'],
                     ':struk'   => $trx['no_struk'],
                     ':total'   => $trx['total_transaksi'],
                     ':bayar'   => $trx['bayar'],
                     ':kembali' => $trx['kembalian'],
+                    ':metode'  => $trx['metode_pembayaran'] ?? 'Tunai',
+                    ':kasir'   => $trx['kasir_id'] ?? 0,
+                    ':nama'    => $trx['nama_kasir'] ?? '-',
                     ':waktu'   => $trx['waktu_transaksi']
                 ]);
 
@@ -56,7 +65,6 @@ class Transaksi {
 
             $this->db->commit();
             return true;
-
         } catch (Exception $e) {
             $this->db->rollBack();
             throw new Exception($e->getMessage());
@@ -64,12 +72,13 @@ class Transaksi {
     }
 
     // [ADMIN] Ambil Laporan Transaksi (Filter Tanggal & Toko)
-    public function getAllLaporan($tgl_mulai = null, $tgl_akhir = null, $id_toko = null) {
+    public function getAllLaporan($tgl_mulai = null, $tgl_akhir = null, $id_toko = null)
+    {
         $sql = "SELECT t.*, k.nama_toko, k.kode_toko 
                 FROM transaksi t
                 JOIN toko k ON t.id_toko = k.id_toko
                 WHERE 1=1 ";
-        
+
         $params = [];
 
         if ($tgl_mulai && $tgl_akhir) {
@@ -91,15 +100,15 @@ class Transaksi {
     }
 
     // [ADMIN] Lihat Detail Barang per Transaksi
-    public function getDetail($id_transaksi) {
+    public function getDetail($id_transaksi)
+    {
         $sql = "SELECT d.*, p.nama_produk, p.kode_produk 
                 FROM detail_transaksi d
                 JOIN produk p ON d.id_produk = p.id_produk
                 WHERE d.id_transaksi = :id";
-        
+
         $stmt = $this->db->prepare($sql);
         $stmt->execute([':id' => $id_transaksi]);
         return $stmt->fetchAll();
     }
 }
-?>

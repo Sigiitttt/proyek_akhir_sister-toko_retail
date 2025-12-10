@@ -8,46 +8,73 @@ class Harga {
         $this->db = $dbConnection;
     }
 
-    // Ambil harga aktif saat ini untuk produk tertentu
-    public function getHargaAktif($id_produk) {
-        $query = "SELECT harga_jual FROM harga 
-                  WHERE id_produk = :id AND aktif = 1 
-                  LIMIT 1";
-        $stmt = $this->db->prepare($query);
-        $stmt->execute([':id' => $id_produk]);
-        $result = $stmt->fetch();
-        return $result ? $result['harga_jual'] : 0;
-    }
+    // 1. Ambil Harga (Revisi Bug Filter Global)
+    public function getHargaList($id_toko_filter = null) {
+        $sql = "SELECT p.id_produk, p.kode_produk, p.nama_produk, 
+                       h.harga_jual, h.tgl_berlaku, h.id_toko, t.nama_toko
+                FROM produk p
+                JOIN harga h ON p.id_produk = h.id_produk
+                LEFT JOIN toko t ON h.id_toko = t.id_toko
+                WHERE h.aktif = 1 AND p.status = 'aktif' ";
 
-    // Ambil riwayat perubahan harga (Untuk Audit)
-    public function getHistory($id_produk) {
-        $query = "SELECT * FROM harga 
-                  WHERE id_produk = :id 
-                  ORDER BY tgl_berlaku DESC";
-        $stmt = $this->db->prepare($query);
-        $stmt->execute([':id' => $id_produk]);
+        // LOGIKA PEMBUATAN QUERY
+        if ($id_toko_filter === 'global') {
+            // Jika filter 'global', cari yang NULL. (Tidak butuh parameter :toko)
+            $sql .= " AND h.id_toko IS NULL"; 
+        } elseif (is_numeric($id_toko_filter) && $id_toko_filter > 0) {
+            // Jika filter angka (ID Toko), cari yang match. (Butuh parameter :toko)
+            $sql .= " AND h.id_toko = :toko"; 
+        }
+
+        $sql .= " ORDER BY p.nama_produk ASC";
+
+        $stmt = $this->db->prepare($sql);
+
+        // LOGIKA BINDING PARAMETER (Harus sinkron dengan logika Query di atas)
+        // Kita gunakan is_numeric() agar string "global" tidak masuk ke sini
+        if (is_numeric($id_toko_filter) && $id_toko_filter > 0) {
+            $stmt->bindValue(':toko', $id_toko_filter);
+        }
+
+        $stmt->execute();
         return $stmt->fetchAll();
     }
 
-    // Set Harga Baru (Matikan yang lama -> Buat yang baru)
-    public function setHargaBaru($id_produk, $harga_baru) {
+    // 2. Set Harga Baru
+    public function setHarga($id_produk, $harga_baru, $id_toko = null) {
         try {
-            // 1. Nonaktifkan harga lama
-            $sqlNonaktif = "UPDATE harga SET aktif = 0 WHERE id_produk = :id";
-            $this->db->prepare($sqlNonaktif)->execute([':id' => $id_produk]);
+            $this->db->beginTransaction();
 
-            // 2. Insert harga baru
-            $sqlBaru = "INSERT INTO harga (id_produk, harga_jual, tgl_berlaku, aktif) 
-                        VALUES (:id, :harga, NOW(), 1)";
-            $stmt = $this->db->prepare($sqlBaru);
-            $stmt->execute([
-                ':id'    => $id_produk,
-                ':harga' => $harga_baru
+            // A. Matikan harga lama
+            if ($id_toko) {
+                // Matikan harga khusus toko ini
+                $sqlOff = "UPDATE harga SET aktif = 0 WHERE id_produk = :p AND id_toko = :t AND aktif = 1";
+                $stmt = $this->db->prepare($sqlOff);
+                $stmt->execute([':p' => $id_produk, ':t' => $id_toko]);
+            } else {
+                // Matikan harga global (id_toko IS NULL)
+                $sqlOff = "UPDATE harga SET aktif = 0 WHERE id_produk = :p AND id_toko IS NULL AND aktif = 1";
+                $this->db->prepare($sqlOff)->execute([':p' => $id_produk]);
+            }
+
+            // B. Insert Harga Baru
+            $sqlNew = "INSERT INTO harga (id_produk, id_toko, harga_jual, tgl_berlaku, aktif) 
+                       VALUES (:p, :t, :h, NOW(), 1)";
+            $this->db->prepare($sqlNew)->execute([
+                ':p' => $id_produk,
+                ':t' => $id_toko, // NULL jika global
+                ':h' => $harga_baru
             ]);
 
-            return true;
+            // C. Trigger Update di Produk
+            $this->db->prepare("UPDATE produk SET updated_at = NOW() WHERE id_produk = ?")->execute([$id_produk]);
+
+            $this->db->commit();
+            return ['status' => 'success', 'message' => 'Harga berhasil diperbarui'];
+
         } catch (Exception $e) {
-            return false;
+            $this->db->rollBack();
+            return ['status' => 'error', 'message' => $e->getMessage()];
         }
     }
 }

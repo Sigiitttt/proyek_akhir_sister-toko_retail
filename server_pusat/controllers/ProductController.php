@@ -1,125 +1,174 @@
 <?php
-// controllers/ProductController.php
-
-// Pastikan meload model yang dibutuhkan
 require_once '../models/Produk.php';
 
-class ProductController {
+class ProductController
+{
     private $db;
     private $produkModel;
 
-    public function __construct($dbConnection) {
+    public function __construct($dbConnection)
+    {
         $this->db = $dbConnection;
-        // Inisialisasi Model Produk
         $this->produkModel = new Produk($dbConnection);
     }
 
-    /**
-     * 1. Menampilkan Semua Produk
-     * Dipanggil oleh public/products.php untuk mengisi tabel
-     */
-    public function getAllProduk() {
+    // TAMPILKAN DATA
+    public function getAllProduk()
+    {
         return $this->produkModel->getAll();
     }
 
-    /**
-     * 2. Menambah Produk Baru
-     * Logic: Insert ke tabel 'produk', lalu ambil ID-nya, lalu insert ke tabel 'harga'
-     */
-    public function store($data) {
-        try {
-            // Mulai Transaksi Database (Agar atomik: semua sukses atau semua gagal)
-            $this->db->beginTransaction();
+    // HANDLE UPLOAD GAMBAR
+    private function uploadImage($file)
+    {
+        $targetDir = "../public/assets/uploads/products/";
+        if (!is_dir($targetDir)) mkdir($targetDir, 0777, true); // Buat folder jika belum ada
 
-            // A. Siapkan data untuk tabel produk
-            $dataProduk = [
-                'kode_produk' => $data['kode_produk'],
-                'nama_produk' => $data['nama_produk'],
-                'satuan'      => $data['satuan']
-            ];
+        $fileName = time() . '_' . basename($file["name"]);
+        $targetFile = $targetDir . $fileName;
+        $imageFileType = strtolower(pathinfo($targetFile, PATHINFO_EXTENSION));
 
-            // B. Panggil Model untuk Insert Produk
-            // Method create() di model harus mengembalikan ID Produk yang baru dibuat
-            $id_produk = $this->produkModel->create($dataProduk);
+        // Validasi ekstensi
+        $allowed = ['jpg', 'jpeg', 'png', 'webp'];
+        if (!in_array($imageFileType, $allowed)) return null;
 
-            // C. Insert Harga Awal ke tabel harga
-            // Kita query manual disini atau bisa buat method di HargaModel, tapi ini cukup simpel
-            $queryHarga = "INSERT INTO harga (id_produk, harga_jual, tgl_berlaku, aktif) 
-                           VALUES (:id, :harga, NOW(), 1)";
-            $stmt = $this->db->prepare($queryHarga);
-            $stmt->execute([
-                ':id'    => $id_produk,
-                ':harga' => $data['harga_jual']
-            ]);
-
-            // Jika semua lancar, Commit (Simpan Permanen)
-            $this->db->commit();
-            return ['status' => 'success', 'message' => 'Produk berhasil ditambahkan'];
-
-        } catch (Exception $e) {
-            // Jika ada error, Rollback (Batalkan semua perubahan)
-            $this->db->rollBack();
-            
-            // Cek error duplicate entry (biasanya kode produk kembar)
-            if (strpos($e->getMessage(), 'Duplicate entry') !== false) {
-                return ['status' => 'error', 'message' => 'Kode Produk/Barcode sudah ada!'];
-            }
-            
-            return ['status' => 'error', 'message' => 'Gagal menyimpan: ' . $e->getMessage()];
+        if (move_uploaded_file($file["tmp_name"], $targetFile)) {
+            return $fileName;
         }
+        return null;
     }
 
-    /**
-     * 3. Update Produk
-     * Logic: Update nama/satuan. Jika harga berubah, matikan harga lama & insert harga baru.
-     */
-    public function update($id_produk, $data) {
+    // TAMBAH / EDIT PRODUK
+    public function save($data, $file = null)
+    {
         try {
             $this->db->beginTransaction();
 
-            // A. Update Data Dasar (Nama & Satuan)
-            $this->produkModel->update($id_produk, [
-                'nama_produk' => $data['nama_produk'],
-                'satuan'      => $data['satuan']
-            ]);
+            // Handle Upload Gambar (Kode sama seperti sebelumnya)
+            $gambar = null;
+            if ($file && $file['name'] != '') {
+                $gambar = $this->uploadImage($file);
+            }
 
-            // B. Cek apakah ada request update harga?
-            if (isset($data['harga_baru']) && $data['harga_baru'] > 0) {
-                // Matikan harga lama
-                $sqlOff = "UPDATE harga SET aktif = 0 WHERE id_produk = :id";
-                $this->db->prepare($sqlOff)->execute([':id' => $id_produk]);
+            // INSERT (Baru)
+            if (empty($data['id_produk'])) {
+                // TAMBAHKAN stok_global DI SINI
+                $sql = "INSERT INTO produk (kode_produk, nama_produk, kategori, satuan, gambar, stok_global, status, created_at) 
+                        VALUES (:kode, :nama, :kategori, :satuan, :gambar, :stok, :status, NOW())";
+                $params = [
+                    ':kode' => $data['kode_produk'],
+                    ':nama' => $data['nama_produk'],
+                    ':kategori' => $data['kategori'],
+                    ':satuan' => $data['satuan'],
+                    ':gambar' => $gambar,
+                    ':stok'   => $data['stok_global'], // Input Stok Awal Pusat
+                    ':status' => $data['status']
+                ];
 
-                // Insert harga baru
-                $sqlNew = "INSERT INTO harga (id_produk, harga_jual, tgl_berlaku, aktif) 
-                           VALUES (:id, :harga, NOW(), 1)";
-                $this->db->prepare($sqlNew)->execute([
-                    ':id'    => $id_produk,
-                    ':harga' => $data['harga_baru']
-                ]);
-                
-                // Trigger update timestamp di produk agar ter-sync ke toko
-                $this->db->query("UPDATE produk SET updated_at = NOW() WHERE id_produk = $id_produk");
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute($params);
+                $id_produk = $this->db->lastInsertId();
+
+                // Insert Harga Awal
+                $stmtH = $this->db->prepare("INSERT INTO harga (id_produk, harga_jual, tgl_berlaku, aktif) VALUES (?, ?, NOW(), 1)");
+                $stmtH->execute([$id_produk, $data['harga_jual']]);
+            }
+            // UPDATE (Edit)
+            else {
+                // TAMBAHKAN stok_global DI SINI JUGA (Biar bisa revisi stok manual)
+                $sql = "UPDATE produk SET kode_produk=:kode, nama_produk=:nama, kategori=:kategori, 
+                        satuan=:satuan, stok_global=:stok, status=:status, updated_at=NOW()";
+
+                $params = [
+                    ':kode' => $data['kode_produk'],
+                    ':nama' => $data['nama_produk'],
+                    ':kategori' => $data['kategori'],
+                    ':satuan' => $data['satuan'],
+                    ':stok'   => $data['stok_global'], // Update stok
+                    ':status' => $data['status'],
+                    ':id' => $data['id_produk']
+                ];
+
+                if ($gambar) {
+                    $sql .= ", gambar=:gambar";
+                    $params[':gambar'] = $gambar;
+                }
+
+                $sql .= " WHERE id_produk=:id";
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute($params);
+
+                // Update Harga (Logic Versioning)
+                if (isset($data['harga_jual'])) {
+                    $this->db->prepare("UPDATE harga SET aktif=0 WHERE id_produk=?")->execute([$data['id_produk']]);
+                    $this->db->prepare("INSERT INTO harga (id_produk, harga_jual, tgl_berlaku, aktif) VALUES (?, ?, NOW(), 1)")
+                        ->execute([$data['id_produk'], $data['harga_jual']]);
+                }
             }
 
             $this->db->commit();
-            return ['status' => 'success', 'message' => 'Produk berhasil diperbarui'];
-
+            return ['status' => 'success', 'message' => 'Produk berhasil disimpan'];
         } catch (Exception $e) {
             $this->db->rollBack();
-            return ['status' => 'error', 'message' => 'Gagal update: ' . $e->getMessage()];
+            return ['status' => 'error', 'message' => $e->getMessage()];
         }
     }
 
-    /**
-     * 4. Hapus Produk (Soft Delete)
-     */
-    public function delete($id_produk) {
+    // HAPUS PRODUK
+    public function delete($id)
+    {
         try {
-            $this->produkModel->delete($id_produk);
-            return ['status' => 'success', 'message' => 'Produk berhasil dinonaktifkan'];
+            // Hapus gambar fisik (opsional)
+            // $stmt = $this->db->prepare("SELECT gambar FROM produk WHERE id_produk=?"); ... unlink() ...
+
+            $stmt = $this->db->prepare("DELETE FROM produk WHERE id_produk = ?");
+            $stmt->execute([$id]);
+            return ['status' => 'success', 'message' => 'Produk dihapus permanen'];
         } catch (Exception $e) {
-            return ['status' => 'error', 'message' => 'Gagal menghapus: ' . $e->getMessage()];
+            return ['status' => 'error', 'message' => 'Gagal hapus: ' . $e->getMessage()];
+        }
+    }
+
+    // IMPORT CSV
+    public function importCSV($file)
+    {
+        if ($file['type'] !== 'text/csv' && $file['type'] !== 'application/vnd.ms-excel') {
+            return ['status' => 'error', 'message' => 'Format file harus CSV'];
+        }
+
+        try {
+            $handle = fopen($file['tmp_name'], "r");
+            fgetcsv($handle); // Skip header row
+
+            $this->db->beginTransaction();
+            while (($row = fgetcsv($handle, 1000, ",")) !== FALSE) {
+                // Format CSV: Kode, Nama, Kategori, Satuan, Harga
+                $kode = $row[0];
+                $nama = $row[1];
+                $kategori = $row[2];
+                $satuan = $row[3];
+                $harga = $row[4];
+
+                // Cek duplikat kode
+                $cek = $this->db->prepare("SELECT id_produk FROM produk WHERE kode_produk = ?");
+                $cek->execute([$kode]);
+                if ($cek->rowCount() > 0) continue; // Skip jika sudah ada
+
+                // Insert Produk
+                $stmt = $this->db->prepare("INSERT INTO produk (kode_produk, nama_produk, kategori, satuan, status, created_at) VALUES (?, ?, ?, ?, 'aktif', NOW())");
+                $stmt->execute([$kode, $nama, $kategori, $satuan]);
+                $id = $this->db->lastInsertId();
+
+                // Insert Harga
+                $stmtH = $this->db->prepare("INSERT INTO harga (id_produk, harga_jual, tgl_berlaku, aktif) VALUES (?, ?, NOW(), 1)");
+                $stmtH->execute([$id, $harga]);
+            }
+            $this->db->commit();
+            fclose($handle);
+            return ['status' => 'success', 'message' => 'Import CSV Berhasil'];
+        } catch (Exception $e) {
+            $this->db->rollBack();
+            return ['status' => 'error', 'message' => 'Import Gagal: ' . $e->getMessage()];
         }
     }
 }
-?>

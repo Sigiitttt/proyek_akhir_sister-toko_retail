@@ -1,33 +1,48 @@
 <?php
-// api/auth.php
-// Pastikan file ini di-include SETELAH config/database.php
+// server_pusat/api/auth.php
 
+// Pastikan tidak ada output sebelum JSON
 header('Content-Type: application/json');
 
-// 1. Cek Header untuk API Key
+// 1. Ambil API Key dari Header
 $headers = getallheaders();
 $api_key = null;
 
-if (isset($headers['X-API-KEY'])) {
-    $api_key = $headers['X-API-KEY'];
-} elseif (isset($_GET['key'])) {
-    // Fallback: Bisa via URL param jika header susah (untuk testing)
+// Cek berbagai kemungkinan penulisan header (X-API-KEY, x-api-key, dll)
+foreach ($headers as $key => $value) {
+    if (strtoupper($key) === 'X-API-KEY') {
+        $api_key = $value;
+        break;
+    }
+}
+
+// Fallback: Cek via URL param (untuk testing browser)
+if (!$api_key && isset($_GET['key'])) {
     $api_key = $_GET['key'];
 }
 
 if (!$api_key) {
-    jsonResponse('error', 'API Key tidak ditemukan. Akses ditolak.', null, 401);
+    echo json_encode(['status' => 'error', 'message' => 'API Key tidak ditemukan.']);
+    exit;
 }
 
 // 2. Validasi ke Database
-require_once '../models/Toko.php';
-$tokoModel = new Toko($db);
-$toko_data = $tokoModel->cekApiKey($api_key);
+// Kita query manual disini biar variabel $toko_data tersedia GLOBAL di file yang meng-include ini
+try {
+    $stmtAuth = $db->prepare("SELECT id_toko, nama_toko, kode_toko FROM toko WHERE api_key = :key AND is_active = 1 LIMIT 1");
+    $stmtAuth->execute([':key' => $api_key]);
+    $toko_data = $stmtAuth->fetch(PDO::FETCH_ASSOC);
 
-if (!$toko_data) {
-    jsonResponse('error', 'API Key tidak valid.', null, 401);
+    if (!$toko_data) {
+        echo json_encode(['status' => 'error', 'message' => 'API Key tidak valid atau toko nonaktif.']);
+        exit;
+    }
+
+    // Jika berhasil, kode di bawah ini tidak dieksekusi, 
+    // dan variabel $toko_data akan terbawa ke file get_products.php
+
+} catch (Exception $e) {
+    echo json_encode(['status' => 'error', 'message' => 'Auth Error: ' . $e->getMessage()]);
+    exit;
 }
-
-// 3. Jika lolos, variabel $toko_data bisa dipakai oleh script utama
-// $toko_data berisi ['id_toko' => 1, 'nama_toko' => '...', 'kode_toko' => '...']
 ?>

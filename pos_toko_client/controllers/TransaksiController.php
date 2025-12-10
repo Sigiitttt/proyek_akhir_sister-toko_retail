@@ -10,18 +10,16 @@ class TransaksiController {
 
     /**
      * 1. Cari Produk (Untuk Search Bar Kasir)
-     * Mengambil data dari tabel 'produk' lokal
      */
     public function cariProduk($keyword = '') {
         try {
             $sql = "SELECT * FROM produk";
             
-            // Filter jika ada keyword pencarian
             if (!empty($keyword)) {
                 $sql .= " WHERE nama_produk LIKE :cari OR kode_produk LIKE :cari";
             }
             
-            $sql .= " LIMIT 20"; // Batasi agar query ringan
+            $sql .= " LIMIT 20"; 
 
             $stmt = $this->db->prepare($sql);
             
@@ -33,19 +31,15 @@ class TransaksiController {
             return $stmt->fetchAll();
 
         } catch (PDOException $e) {
-            return []; // Kembalikan array kosong jika error
+            return [];
         }
     }
 
     /**
-     * 2. Simpan Transaksi (INTI SISTEM TERDISTRIBUSI)
-     * Logic: 
-     * - Hitung Total
-     * - Buat ID Unik (UUID String) agar tidak bentrok dengan toko lain
-     * - Insert Header & Detail ke DB Lokal
-     * - Status 'is_synced' = 0 (Pending)
+     * 2. Simpan Transaksi
+     * Logic: Hitung Total -> Validasi -> Generate ID -> Insert Header -> Insert Detail -> KURANGI STOK
      */
-    public function simpanTransaksi($cart, $bayar, $kasir_id) {
+    public function simpanTransaksi($cart, $bayar, $kasir_id, $metode = 'Tunai') {
         // Validasi Keranjang
         if (empty($cart)) {
             return ['status' => 'error', 'message' => 'Keranjang belanja kosong!'];
@@ -55,39 +49,36 @@ class TransaksiController {
             // A. Mulai Database Transaction (Safety)
             $this->db->beginTransaction();
 
-            // B. Hitung Total & Kembalian
+            // B. Hitung Total Belanja
             $total_belanja = 0;
             foreach ($cart as $item) {
                 $total_belanja += ($item['harga'] * $item['qty']);
             }
 
+            // Validasi Pembayaran
+            if ($metode != 'Tunai') {
+                $bayar = $total_belanja; // Auto lunas jika non-tunai
+            }
+
             $kembalian = $bayar - $total_belanja;
             
-            // Validasi Pembayaran
-            if ($kembalian < 0) {
-                // Batalkan transaksi database
+            if ($metode == 'Tunai' && $kembalian < 0) {
                 $this->db->rollBack(); 
                 return ['status' => 'error', 'message' => 'Uang pembayaran kurang!'];
             }
 
-            // C. Generate ID Transaksi Unik (Distributed ID)
-            // Format: TRX-[ID_TOKO]-[TIMESTAMP]-[RANDOM]
-            // Contoh: TRX-1-20231207123000-589
-            // Pastikan ID_TOKO ada di config/app.php
+            // C. Generate ID Transaksi Unik
             $toko_id  = defined('ID_TOKO') ? ID_TOKO : 'LOKAL';
             $waktu    = date('YmdHis');
             $random   = rand(100, 999);
             $id_trx   = "TRX-{$toko_id}-{$waktu}-{$random}";
-            
-            // Generate Nomor Struk (Untuk antrian harian)
-            $no_struk = "STR-" . date('His') . "-" . rand(10,99);
+            $no_struk = "STR-" . date('ymd') . rand(1000,9999);
 
             // D. Insert Header Transaksi
-            // Penting: is_synced diset 0 (Belum terkirim ke pusat)
             $sqlHeader = "INSERT INTO transaksi 
-                          (id_transaksi, no_struk, total_transaksi, bayar, kembalian, waktu_transaksi, kasir_id, is_synced) 
+                          (id_transaksi, no_struk, total_transaksi, bayar, kembalian, metode_pembayaran, waktu_transaksi, kasir_id, is_synced) 
                           VALUES 
-                          (:id, :struk, :total, :bayar, :kembali, NOW(), :kasir, 0)";
+                          (:id, :struk, :total, :bayar, :kembali, :metode, NOW(), :kasir, 0)";
             
             $stmtHeader = $this->db->prepare($sqlHeader);
             $stmtHeader->execute([
@@ -96,18 +87,22 @@ class TransaksiController {
                 ':total'   => $total_belanja,
                 ':bayar'   => $bayar,
                 ':kembali' => $kembalian,
+                ':metode'  => $metode,
                 ':kasir'   => $kasir_id
             ]);
 
-            // E. Insert Detail Items (Looping barang di keranjang)
-            $sqlDetail = "INSERT INTO detail_transaksi 
-                          (id_transaksi, id_produk, qty, harga_satuan, subtotal) 
-                          VALUES (:idtrx, :idprod, :qty, :harga, :subtotal)";
-            
+            // E. Insert Detail Items & KURANGI STOK LOKAL
+            $sqlDetail = "INSERT INTO detail_transaksi (id_transaksi, id_produk, qty, harga_satuan, subtotal) VALUES (:idtrx, :idprod, :qty, :harga, :subtotal)";
             $stmtDetail = $this->db->prepare($sqlDetail);
+
+            // Query Kurangi Stok
+            $sqlStok = "UPDATE produk SET stok_lokal = stok_lokal - :qty WHERE id_produk = :idprod";
+            $stmtStok = $this->db->prepare($sqlStok);
 
             foreach ($cart as $item) {
                 $subtotal = $item['harga'] * $item['qty'];
+                
+                // 1. Simpan Detail
                 $stmtDetail->execute([
                     ':idtrx'    => $id_trx,
                     ':idprod'   => $item['id'],
@@ -115,9 +110,15 @@ class TransaksiController {
                     ':harga'    => $item['harga'],
                     ':subtotal' => $subtotal
                 ]);
+
+                // 2. Kurangi Stok
+                $stmtStok->execute([
+                    ':qty'    => $item['qty'],
+                    ':idprod' => $item['id']
+                ]);
             }
 
-            // F. Commit (Simpan Permanen jika semua langkah di atas sukses)
+            // F. Commit (Simpan Permanen)
             $this->db->commit();
 
             return [
@@ -128,7 +129,7 @@ class TransaksiController {
             ];
 
         } catch (Exception $e) {
-            // G. Rollback (Batalkan semua jika ada error di tengah jalan)
+            // G. Rollback jika error
             $this->db->rollBack();
             return [
                 'status'  => 'error',

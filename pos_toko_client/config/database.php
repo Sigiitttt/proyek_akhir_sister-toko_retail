@@ -1,6 +1,6 @@
 <?php
 $host = 'localhost';
-$db_name = 'retail_toko_lokal'; // Pastikan database ini sudah dibuat di phpMyAdmin
+$db_name = 'cabang-sby'; // Pastikan database ini sudah dibuat di phpMyAdmin
 $username = 'root';
 $password = '';
 

@@ -2,116 +2,151 @@
 session_start();
 require_once '../config/database.php';
 require_once '../config/app.php';
+require_once '../controllers/SyncController.php';
 
-// Cek Login
-// if (!isset($_SESSION['kasir_logged_in'])) { header("Location: index.php"); exit; }
+if (!isset($_SESSION['kasir_logged_in'])) { header("Location: index.php"); exit; }
 
 $pesan = '';
+$syncController = new SyncController($db_lokal);
 
 // ==========================================
-// HANDLE LOGIC SYNC (SAAT TOMBOL DITEKAN)
+// HANDLE LOGIC SYNC
 // ==========================================
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     
-    // 1. ACTION: DOWNLOAD PRODUK (Pusat -> Lokal)
+    // 1. DOWNLOAD
     if ($_POST['action'] == 'download_produk') {
-        // Kita akan me-load script logika sync yang nanti akan kita buat di folder ../sync/
-        // Menggunakan output buffering untuk menangkap pesan dari script tersebut
-        ob_start();
-        include '../sync/pull_produk.php'; 
-        $output = ob_get_clean();
+        $hasil = $syncController->syncProduk();
         
-        // Cek hasil (Logic sederhana: kalau ada kata "Berhasil", anggap sukses)
-        if (strpos($output, 'Berhasil') !== false) {
-            $pesan = "<div class='alert alert-success'><i class='fa-solid fa-check-circle me-2'></i>Sinkronisasi Produk Berhasil! Data lokal sudah update.</div>";
+        if ($hasil['status'] == 'success') {
+            $pesan = "<div class='alert alert-success border-0 shadow-sm'><i class='fa-solid fa-circle-check me-2'></i>{$hasil['message']}</div>";
         } else {
-            $pesan = "<div class='alert alert-warning'><i class='fa-solid fa-triangle-exclamation me-2'></i>Respon Server: $output</div>";
+            $pesan = "<div class='alert alert-danger border-0 shadow-sm'><i class='fa-solid fa-triangle-exclamation me-2'></i>{$hasil['message']}</div>";
         }
     }
 
-    // 2. ACTION: UPLOAD TRANSAKSI (Lokal -> Pusat)
+    // 2. UPLOAD
     if ($_POST['action'] == 'upload_transaksi') {
-        ob_start();
-        include '../sync/push_transaksi.php';
-        $output = ob_get_clean();
+        $hasil = $syncController->uploadTransaksi();
 
-        if (strpos($output, 'Berhasil') !== false) {
-            $pesan = "<div class='alert alert-success'><i class='fa-solid fa-check-circle me-2'></i>Laporan Transaksi Berhasil Terkirim ke Pusat!</div>";
-        } elseif (strpos($output, 'Kosong') !== false) {
-            $pesan = "<div class='alert alert-info'><i class='fa-solid fa-info-circle me-2'></i>Tidak ada transaksi baru untuk dikirim.</div>";
+        if ($hasil['status'] == 'success') {
+            $pesan = "<div class='alert alert-success border-0 shadow-sm'><i class='fa-solid fa-paper-plane me-2'></i>{$hasil['message']}</div>";
+        } elseif ($hasil['status'] == 'info') {
+            $pesan = "<div class='alert alert-info border-0 shadow-sm'><i class='fa-solid fa-circle-info me-2'></i>{$hasil['message']}</div>";
         } else {
-            $pesan = "<div class='alert alert-danger'><i class='fa-solid fa-triangle-exclamation me-2'></i>Gagal Upload: $output</div>";
+            $pesan = "<div class='alert alert-danger border-0 shadow-sm'><i class='fa-solid fa-triangle-exclamation me-2'></i>{$hasil['message']}</div>";
         }
     }
 }
 
-// ==========================================
 // DATA MONITORING
-// ==========================================
-
-// 1. Hitung Pending Upload
 $stmt = $db_lokal->query("SELECT COUNT(*) FROM transaksi WHERE is_synced = 0");
 $pendingCount = $stmt->fetchColumn();
 
-// 2. Cek Terakhir Update Produk
 $stmt = $db_lokal->query("SELECT MAX(updated_at_pusat) FROM produk");
 $lastUpdate = $stmt->fetchColumn();
-$lastUpdateText = $lastUpdate ? date('d M Y H:i', strtotime($lastUpdate)) : 'Belum pernah sync';
-
+$lastUpdateText = $lastUpdate ? date('d M Y, H:i', strtotime($lastUpdate)) : 'Belum pernah sync';
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sinkronisasi Data - POS</title>
+    <title>Sinkronisasi - POS System</title>
+    
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
     <style>
-        body { background-color: #f4f6f9; font-family: 'Inter', sans-serif; }
-        .card-sync { border: none; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); transition: 0.3s; }
-        .card-sync:hover { transform: translateY(-5px); }
-        .icon-box { width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 1rem; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8f9fc;
+            color: #5a5c69;
+        }
+        
+        .card-sync {
+            border: none;
+            border-radius: 1rem;
+            background: white;
+            box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.05);
+            transition: all 0.3s ease;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .card-sync:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 0.5rem 2rem 0 rgba(58, 59, 69, 0.1);
+        }
+
+        .icon-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            margin: 0 auto 1.5rem;
+        }
+
+        .border-top-primary { border-top: 5px solid #4e73df; }
+        .border-top-warning { border-top: 5px solid #f6c23e; }
+        
+        .bg-light-primary { background-color: #e3f2fd; color: #4e73df; }
+        .bg-light-warning { background-color: #fff3e0; color: #f6c23e; }
+
+        .status-box {
+            background-color: #f8f9fc;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-top: 1rem;
+            border: 1px solid #e3e6f0;
+        }
     </style>
 </head>
 <body>
 
-    <nav class="navbar navbar-light bg-white shadow-sm py-3 mb-5">
+    <nav class="navbar navbar-expand-lg bg-white shadow-sm fixed-top py-3">
         <div class="container">
-            <a href="dashboard.php" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
-                <i class="fa-solid fa-arrow-left me-1"></i> Dashboard
+            <a href="dashboard.php" class="btn btn-light text-secondary rounded-pill fw-bold shadow-sm px-3">
+                <i class="fa-solid fa-arrow-left me-2"></i>Dashboard
             </a>
-            <span class="fw-bold text-primary"><i class="fa-solid fa-rotate me-2"></i> KONTROL SINKRONISASI</span>
-            <div style="width: 80px;"></div>
-        </div>
+            <span class="navbar-brand mb-0 h1 fw-bold text-primary mx-auto">
+                <i class="fa-solid fa-rotate me-2"></i> SINKRONISASI DATA
+            </span>
+            <div style="width: 100px;"></div> </div>
     </nav>
 
-    <div class="container">
+    <div class="container" style="margin-top: 100px; padding-bottom: 50px;">
         
         <?php echo $pesan; ?>
 
         <div class="row g-4 justify-content-center">
             
-            <div class="col-md-5">
-                <div class="card card-sync h-100 p-4">
-                    <div class="text-center">
-                        <div class="icon-box bg-info bg-opacity-10 text-info mx-auto">
+            <div class="col-md-6 col-lg-5">
+                <div class="card card-sync border-top-primary p-4 text-center">
+                    <div class="card-body">
+                        <div class="icon-circle bg-light-primary">
                             <i class="fa-solid fa-cloud-arrow-down"></i>
                         </div>
-                        <h5 class="fw-bold">Ambil Data Produk</h5>
-                        <p class="text-muted small">
-                            Mengambil data barang dan harga terbaru dari Server Pusat. 
-                            <br>Lakukan ini setiap toko buka.
+                        <h4 class="fw-bold text-dark">Ambil Data Produk</h4>
+                        <p class="text-muted small mb-4">
+                            Unduh data produk, harga, dan stok terbaru dari Server Pusat. Pastikan koneksi internet stabil.
                         </p>
                         
-                        <div class="alert alert-light border py-2 my-3">
-                            <small class="text-muted d-block">Terakhir Update:</small>
-                            <strong><?php echo $lastUpdateText; ?></strong>
+                        <div class="status-box mb-4 text-start">
+                            <small class="text-uppercase text-secondary fw-bold" style="font-size: 0.7rem;">Terakhir Diperbarui</small>
+                            <div class="fw-bold text-dark mt-1">
+                                <i class="fa-regular fa-clock me-2 text-primary"></i> <?php echo $lastUpdateText; ?>
+                            </div>
                         </div>
 
                         <form method="POST" onsubmit="return confirm('Update data produk dari pusat?');">
                             <input type="hidden" name="action" value="download_produk">
-                            <button type="submit" class="btn btn-info text-white w-100 rounded-pill fw-bold">
+                            <button type="submit" class="btn btn-primary w-100 py-2 rounded-pill fw-bold shadow-sm">
                                 <i class="fa-solid fa-download me-2"></i> DOWNLOAD SEKARANG
                             </button>
                         </form>
@@ -119,30 +154,31 @@ $lastUpdateText = $lastUpdate ? date('d M Y H:i', strtotime($lastUpdate)) : 'Bel
                 </div>
             </div>
 
-            <div class="col-md-5">
-                <div class="card card-sync h-100 p-4 border-2 <?php echo ($pendingCount > 0) ? 'border-warning' : 'border-white'; ?>">
-                    <div class="text-center">
-                        <div class="icon-box bg-warning bg-opacity-10 text-warning mx-auto">
+            <div class="col-md-6 col-lg-5">
+                <div class="card card-sync border-top-warning p-4 text-center">
+                    <div class="card-body">
+                        <div class="icon-circle bg-light-warning">
                             <i class="fa-solid fa-cloud-arrow-up"></i>
                         </div>
-                        <h5 class="fw-bold">Kirim Laporan Transaksi</h5>
-                        <p class="text-muted small">
-                            Mengirim data penjualan offline ke Database Pusat.
-                            <br>Lakukan secara berkala.
+                        <h4 class="fw-bold text-dark">Upload Transaksi</h4>
+                        <p class="text-muted small mb-4">
+                            Kirim laporan penjualan offline ke Server Pusat untuk rekapitulasi data.
                         </p>
 
-                        <div class="alert <?php echo ($pendingCount > 0) ? 'alert-warning' : 'alert-success'; ?> py-2 my-3">
-                            <small class="d-block">Status Data Lokal:</small>
-                            <?php if($pendingCount > 0): ?>
-                                <strong class="text-danger"><?php echo $pendingCount; ?> Transaksi Pending</strong>
-                            <?php else: ?>
-                                <strong class="text-success">Semua Data Terkirim</strong>
-                            <?php endif; ?>
+                        <div class="status-box mb-4 text-start">
+                            <small class="text-uppercase text-secondary fw-bold" style="font-size: 0.7rem;">Status Data Lokal</small>
+                            <div class="mt-1 d-flex justify-content-between align-items-center">
+                                <?php if($pendingCount > 0): ?>
+                                    <span class="text-danger fw-bold"><i class="fa-solid fa-triangle-exclamation me-2"></i><?php echo $pendingCount; ?> Pending</span>
+                                <?php else: ?>
+                                    <span class="text-success fw-bold"><i class="fa-solid fa-circle-check me-2"></i>Semua Terkirim</span>
+                                <?php endif; ?>
+                            </div>
                         </div>
 
                         <form method="POST">
                             <input type="hidden" name="action" value="upload_transaksi">
-                            <button type="submit" class="btn btn-warning text-dark w-100 rounded-pill fw-bold" 
+                            <button type="submit" class="btn btn-warning text-white w-100 py-2 rounded-pill fw-bold shadow-sm" 
                                 <?php echo ($pendingCount == 0) ? 'disabled' : ''; ?>>
                                 <i class="fa-solid fa-paper-plane me-2"></i> 
                                 <?php echo ($pendingCount > 0) ? 'UPLOAD DATA' : 'DATA SUDAH AMAN'; ?>
@@ -155,12 +191,13 @@ $lastUpdateText = $lastUpdate ? date('d M Y H:i', strtotime($lastUpdate)) : 'Bel
         </div>
 
         <div class="text-center mt-5">
-            <span class="badge bg-light text-secondary border px-3 py-2">
-                <i class="fa-solid fa-link me-2"></i>
-                Terhubung ke: <?php echo BASE_API_URL; ?>
+            <span class="badge bg-white text-secondary border shadow-sm px-4 py-2 rounded-pill fw-normal">
+                <i class="fa-solid fa-link me-2 text-success"></i>
+                Terhubung ke: <span class="font-monospace text-dark"><?php echo BASE_API_URL; ?></span>
             </span>
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

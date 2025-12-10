@@ -6,29 +6,32 @@ class TransaksiController {
         $this->db = $dbConnection;
     }
 
-    // Ambil semua transaksi (bisa difilter tanggal)
-    public function getAllTransaksi($filterTanggal = null, $filterToko = null) {
-        $sql = "SELECT t.*, k.nama_toko 
+    // 1. Ambil Laporan dengan Filter Lengkap
+    public function getLaporanFilter($filters) {
+        $sql = "SELECT t.*, k.nama_toko, k.kode_toko 
                 FROM transaksi t
-                JOIN toko k ON t.id_toko = k.id_toko ";
+                JOIN toko k ON t.id_toko = k.id_toko
+                WHERE 1=1 ";
         
-        $conditions = [];
         $params = [];
 
-        // Filter by Tanggal
-        if ($filterTanggal) {
-            $conditions[] = "DATE(t.waktu_transaksi) = :tgl";
-            $params[':tgl'] = $filterTanggal;
+        // Filter Tanggal
+        if (!empty($filters['tgl_mulai']) && !empty($filters['tgl_akhir'])) {
+            $sql .= " AND DATE(t.waktu_transaksi) BETWEEN :mulai AND :akhir";
+            $params[':mulai'] = $filters['tgl_mulai'];
+            $params[':akhir'] = $filters['tgl_akhir'];
         }
 
-        // Filter by Toko
-        if ($filterToko) {
-            $conditions[] = "t.id_toko = :toko";
-            $params[':toko'] = $filterToko;
+        // Filter Cabang
+        if (!empty($filters['id_toko'])) {
+            $sql .= " AND t.id_toko = :toko";
+            $params[':toko'] = $filters['id_toko'];
         }
 
-        if (!empty($conditions)) {
-            $sql .= " WHERE " . implode(" AND ", $conditions);
+        // Filter Metode Pembayaran
+        if (!empty($filters['metode'])) {
+            $sql .= " AND t.metode_pembayaran = :metode";
+            $params[':metode'] = $filters['metode'];
         }
 
         $sql .= " ORDER BY t.waktu_transaksi DESC";
@@ -38,24 +41,27 @@ class TransaksiController {
         return $stmt->fetchAll();
     }
 
-    // Lihat Detail Item per Transaksi
-    public function getDetailTransaksi($id_transaksi) {
-        $sql = "SELECT d.*, p.nama_produk, p.kode_produk 
-                FROM detail_transaksi d
-                JOIN produk p ON d.id_produk = p.id_produk
-                WHERE d.id_transaksi = :id";
-        
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute([':id' => $id_transaksi]);
-        return $stmt->fetchAll();
-    }
-    
-    // Hitung Total Omset Hari Ini
-    public function getOmsetHariIni() {
-        $sql = "SELECT SUM(total_transaksi) as total FROM transaksi WHERE DATE(waktu_transaksi) = CURDATE()";
-        $stmt = $this->db->query($sql);
-        $row = $stmt->fetch();
-        return $row['total'] ?? 0;
+    // 2. Ambil Detail Lengkap (Header + Items)
+    public function getDetailLengkap($id_transaksi) {
+        // Ambil Header
+        $sqlHead = "SELECT t.*, k.nama_toko, k.alamat 
+                    FROM transaksi t 
+                    JOIN toko k ON t.id_toko = k.id_toko 
+                    WHERE t.id_transaksi = :id";
+        $stmtHead = $this->db->prepare($sqlHead);
+        $stmtHead->execute([':id' => $id_transaksi]);
+        $header = $stmtHead->fetch();
+
+        // Ambil Items
+        $sqlItem = "SELECT d.*, p.nama_produk, p.kode_produk 
+                    FROM detail_transaksi d
+                    JOIN produk p ON d.id_produk = p.id_produk
+                    WHERE d.id_transaksi = :id";
+        $stmtItem = $this->db->prepare($sqlItem);
+        $stmtItem->execute([':id' => $id_transaksi]);
+        $items = $stmtItem->fetchAll();
+
+        return ['header' => $header, 'items' => $items];
     }
 }
 ?>

@@ -17,26 +17,22 @@ class AuthController {
             // 1. Cari user berdasarkan username
             $stmt = $this->db->prepare("SELECT * FROM users WHERE username = :u LIMIT 1");
             $stmt->execute([':u' => $username]);
-            $user = $stmt->fetch();
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             // 2. Verifikasi Password
             if ($user) {
-                // CATATAN PENTING:
-                // Jika di dummy data passwordnya plain text (misal: "123456"), gunakan perbandingan langsung:
-                // if ($password === $user['password']) { ... }
+                // PENTING: Karena di database kamu passwordnya belum di-hash (masih tulisan biasa)
+                // Kita gunakan perbandingan langsung (===)
                 
-                // Tapi jika production, gunakan password_verify() (Hash):
-                // if (password_verify($password, $user['password'])) { ... }
-
-                // Kita pakai logic sederhana (plain text) agar sesuai dengan dummy data SQL sebelumnya
                 if ($password === $user['password']) {
                     
                     // Set Session
                     if (session_status() == PHP_SESSION_NONE) session_start();
                     
                     $_SESSION['kasir_logged_in'] = true;
-                    $_SESSION['kasir_id'] = $user['id_user'];
+                    $_SESSION['kasir_id']   = $user['id_user'];
                     $_SESSION['kasir_nama'] = $user['nama_lengkap'];
+                    $_SESSION['kasir_role'] = $user['role']; // Simpan role juga (kasir/spv)
 
                     return ['status' => 'success', 'message' => 'Login berhasil'];
                 }
