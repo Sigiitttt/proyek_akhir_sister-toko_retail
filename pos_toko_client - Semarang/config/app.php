@@ -1,8 +1,8 @@
 <?php
 date_default_timezone_set('Asia/Jakarta');
 define('BASE_API_URL', 'http://localhost/retail-sister/server_pusat/api/');
-define('TOKO_API_KEY', 'e52610451ccea924ef56fb4ff70ae427');
-define('ID_TOKO', 1);
+define('TOKO_API_KEY', '91af53374821c0896b4292442107494d');
+define('ID_TOKO', 3);
 define('BASE_URL', 'http://localhost/pos_toko_client/public/');
 
 function callAPI($endpoint, $method = 'GET', $data = null) {

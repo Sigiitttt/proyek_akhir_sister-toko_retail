@@ -12,7 +12,8 @@ $pendingSync = $stmt->fetchColumn();
 
 $stmt = $db_lokal->query("SELECT COUNT(*) FROM produk");
 $totalProduk = $stmt->fetchColumn();
-$namaCabang = "Toko Bandung";
+$namaCabang = "Toko Surakarta";
+
 // Ambil Omset Hari Ini (Lokal)
 $today = date('Y-m-d');
 $stmt = $db_lokal->prepare("SELECT SUM(total_transaksi) FROM transaksi WHERE DATE(waktu_transaksi) = ?");
@@ -151,8 +152,6 @@ $omsetHariIni = $stmt->fetchColumn() ?: 0;
     </nav>
 
     <div class="container" style="margin-top: 100px; padding-bottom: 50px;">
-        
-        <div class="container" style="margin-top: 100px; padding-bottom: 50px;">
     
     <div class="row mb-4">
         <div class="col-12">

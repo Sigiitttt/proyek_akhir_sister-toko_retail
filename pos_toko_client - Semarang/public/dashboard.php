@@ -12,7 +12,7 @@ $pendingSync = $stmt->fetchColumn();
 
 $stmt = $db_lokal->query("SELECT COUNT(*) FROM produk");
 $totalProduk = $stmt->fetchColumn();
-$namaCabang = "Toko Bandung";
+$namaCabang = "Toko Semarang";
 // Ambil Omset Hari Ini (Lokal)
 $today = date('Y-m-d');
 $stmt = $db_lokal->prepare("SELECT SUM(total_transaksi) FROM transaksi WHERE DATE(waktu_transaksi) = ?");
