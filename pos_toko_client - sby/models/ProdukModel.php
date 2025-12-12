@@ -14,10 +14,19 @@ class ProdukModel {
      */
     public function getAll($keyword = null) {
         $sql = "SELECT * FROM produk";
+        
         if ($keyword) {
             $sql .= " WHERE nama_produk LIKE :cari OR kode_produk LIKE :cari";
         }
-        $sql .= " LIMIT 50"; // Limit biar ringan
+        
+        // --- LOGIKA SORTING ---
+        // 1. Prioritas Stok: (stok_lokal > 0) DESC 
+        //    Artinya: Produk ada stok (True/1) muncul duluan, stok 0 di bawah.
+        // 2. Urutan Abjad: nama_produk ASC
+        $sql .= " ORDER BY (stok_lokal > 0) DESC, nama_produk ASC";
+
+        // LIMIT dihapus agar semua produk (100+) muncul
+        // $sql .= " LIMIT 50"; 
 
         $stmt = $this->db->prepare($sql);
         if ($keyword) {
@@ -48,35 +57,44 @@ class ProdukModel {
 
     /**
      * Simpan/Update produk dari hasil download API Pusat
-     * Menggunakan ON DUPLICATE KEY UPDATE (Upsert)
      * Dipanggil di: SyncController
      */
     public function upsertFromSync($dataProduk) {
         try {
-            $sql = "INSERT INTO produk (id_produk, kode_produk, nama_produk, satuan, harga_jual, updated_at_pusat) 
-                    VALUES (:id, :kode, :nama, :satuan, :harga, :updated)
+            // INSERT INTO ... ON DUPLICATE KEY UPDATE
+            // Tambahan: Kita juga update 'stok_lokal' jika server mengirim data 'stok_toko'
+            // Ini penting agar saat pertama kali sync, stok tidak 0.
+            
+            $sql = "INSERT INTO produk (id_produk, kode_produk, nama_produk, satuan, harga_jual, stok_lokal, updated_at_pusat) 
+                    VALUES (:id, :kode, :nama, :satuan, :harga, :stok, :updated)
                     ON DUPLICATE KEY UPDATE 
                     kode_produk = :kode, 
                     nama_produk = :nama, 
                     satuan = :satuan, 
                     harga_jual = :harga, 
+                    stok_lokal = :stok, -- Update stok lokal sesuai jatah dari server
                     updated_at_pusat = :updated";
 
             $stmt = $this->db->prepare($sql);
 
             foreach ($dataProduk as $p) {
+                // Pastikan ada nilai default untuk stok jika server tidak mengirimnya
+                $stokDariServer = isset($p['stok_toko']) ? $p['stok_toko'] : 0;
+
                 $stmt->execute([
                     ':id'      => $p['id_produk'],
                     ':kode'    => $p['kode_produk'],
                     ':nama'    => $p['nama_produk'],
                     ':satuan'  => $p['satuan'],
                     ':harga'   => $p['harga_jual'],
+                    ':stok'    => $stokDariServer, 
                     ':updated' => $p['updated_at']
                 ]);
             }
             return true;
         } catch (PDOException $e) {
-            // Log error jika perlu
+            // Jika ingin debug, uncomment baris bawah:
+            // echo "Error: " . $e->getMessage(); 
             return false;
         }
     }

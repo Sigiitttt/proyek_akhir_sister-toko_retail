@@ -9,7 +9,7 @@ require_once '../controllers/HargaController.php';
 $controller = new HargaController($db);
 $pesan = '';
 
-// Handle Submit
+// Handle Submit (Update Harga)
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['action'] == 'update_harga') {
     $hasil = $controller->prosesUpdate($_POST);
     $alertType = ($hasil['status'] == 'success') ? 'success' : 'danger';
@@ -19,12 +19,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
               </div>";
 }
 
-// Ambil Daftar Toko untuk Dropdown
+// Ambil Daftar Toko & Kategori untuk Dropdown
 $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
+$kategoriList = $db->query("SELECT DISTINCT kategori FROM produk ORDER BY kategori ASC")->fetchAll(PDO::FETCH_COLUMN);
 
-// Filter Data
-$filter_toko = isset($_GET['filter_toko']) ? $_GET['filter_toko'] : ''; // Default tampil semua
-$listHarga = $controller->getTabelHarga($filter_toko);
+// Ambil Parameter Filter dari URL
+$filter_toko = $_GET['filter_toko'] ?? '';
+$filter_kategori = $_GET['filter_kategori'] ?? '';
+$search_query = $_GET['cari'] ?? '';
+
+// Ambil Data Harga (Dengan Filter Manual di PHP atau Modifikasi Controller)
+// Note: Idealnya filter dilakukan di query SQL Controller. 
+// Namun untuk cepat tanpa ubah controller, kita filter manual array hasilnya di sini.
+$semuaHarga = $controller->getTabelHarga($filter_toko); 
+$listHarga = [];
+
+foreach ($semuaHarga as $h) {
+    // Logika Filter
+    $matchKategori = ($filter_kategori == '' || $h['kategori'] == $filter_kategori);
+    $matchSearch = ($search_query == '' || stripos($h['nama_produk'], $search_query) !== false || stripos($h['kode_produk'], $search_query) !== false);
+    
+    if ($matchKategori && $matchSearch) {
+        $listHarga[] = $h;
+    }
+}
 
 ?>
 <!DOCTYPE html>
@@ -119,21 +137,50 @@ $listHarga = $controller->getTabelHarga($filter_toko);
 
                 <div class="card card-stat mb-4">
                     <div class="card-body py-3">
-                        <form method="GET" class="row align-items-center g-2">
-                            <div class="col-auto">
-                                <span class="fw-bold small text-secondary text-uppercase"><i class="fa-solid fa-filter me-2"></i>Filter Cabang:</span>
-                            </div>
-                            <div class="col-md-4">
-                                <select name="filter_toko" class="form-select form-select-sm bg-light border-0" onchange="this.form.submit()">
-                                    <option value="">-- Tampilkan Semua Harga --</option>
-                                    <option value="global" <?php echo ($filter_toko === 'global') ? 'selected' : ''; ?>>🌍 Hanya Harga Global (Umum)</option>
+                        <form method="GET" class="row g-2 align-items-center">
+                            
+                            <div class="col-md-3">
+                                <label class="small text-muted fw-bold d-block mb-1">Filter Cabang</label>
+                                <select name="filter_toko" class="form-select form-select-sm bg-light border-0 fw-bold text-secondary" onchange="this.form.submit()">
+                                    <option value="">-- Semua Harga --</option>
+                                    <option value="global" <?php echo ($filter_toko === 'global') ? 'selected' : ''; ?>>🌍 Hanya Harga Global</option>
                                     <?php foreach($tokoList as $t): ?>
                                         <option value="<?php echo $t['id_toko']; ?>" <?php echo ($filter_toko == $t['id_toko']) ? 'selected' : ''; ?>>
-                                            🏪 Khusus <?php echo $t['nama_toko']; ?>
+                                            🏪 <?php echo $t['nama_toko']; ?>
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
+
+                            <div class="col-md-3">
+                                <label class="small text-muted fw-bold d-block mb-1">Kategori Produk</label>
+                                <select name="filter_kategori" class="form-select form-select-sm bg-light border-0 fw-bold text-secondary" onchange="this.form.submit()">
+                                    <option value="">📂 Semua Kategori</option>
+                                    <?php foreach($kategoriList as $kat): ?>
+                                        <option value="<?php echo $kat; ?>" <?php echo ($filter_kategori == $kat) ? 'selected' : ''; ?>>
+                                            <?php echo $kat; ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="small text-muted fw-bold d-block mb-1">Cari Produk</label>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text bg-light border-0"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
+                                    <input type="text" name="cari" class="form-control border-0 bg-light" placeholder="Nama / Kode SKU..." value="<?php echo htmlspecialchars($search_query); ?>">
+                                    <button type="submit" class="btn btn-primary px-3">Cari</button>
+                                </div>
+                            </div>
+
+                            <div class="col-md-2 text-end d-flex align-items-end justify-content-end h-100 mt-4">
+                                <?php if($filter_toko || $filter_kategori || $search_query): ?>
+                                    <a href="harga.php" class="btn btn-light text-danger btn-sm fw-bold shadow-sm">
+                                        <i class="fa-solid fa-xmark me-1"></i> Reset Filter
+                                    </a>
+                                <?php endif; ?>
+                            </div>
+
                         </form>
                     </div>
                 </div>
@@ -146,6 +193,7 @@ $listHarga = $controller->getTabelHarga($filter_toko);
                                     <tr>
                                         <th class="ps-4">Nama Produk</th>
                                         <th>Kode SKU</th>
+                                        <th>Kategori</th>
                                         <th>Cakupan Harga</th>
                                         <th class="text-end">Harga Jual</th>
                                         <th class="text-center">Berlaku Sejak</th>
@@ -154,12 +202,13 @@ $listHarga = $controller->getTabelHarga($filter_toko);
                                 </thead>
                                 <tbody>
                                     <?php if(empty($listHarga)): ?>
-                                        <tr><td colspan="6" class="text-center py-5 text-muted">Data harga tidak ditemukan.</td></tr>
+                                        <tr><td colspan="7" class="text-center py-5 text-muted">Data harga tidak ditemukan.</td></tr>
                                     <?php else: ?>
                                         <?php foreach($listHarga as $h): ?>
                                         <tr>
                                             <td class="ps-4 fw-bold text-dark"><?php echo $h['nama_produk']; ?></td>
                                             <td class="small font-monospace text-primary"><?php echo $h['kode_produk']; ?></td>
+                                            <td><span class="badge bg-light text-secondary border fw-normal"><?php echo $h['kategori']; ?></span></td>
                                             <td>
                                                 <?php if(empty($h['id_toko'])): ?>
                                                     <span class="badge badge-global rounded-pill px-3 py-2 shadow-sm">
@@ -184,7 +233,7 @@ $listHarga = $controller->getTabelHarga($filter_toko);
                                                         data-harga="<?php echo $h['harga_jual']; ?>"
                                                         data-toko="<?php echo $h['id_toko'] ?? 'global'; ?>"
                                                         onclick="openModal(this)">
-                                                    <i class="fa-solid fa-pen me-1"></i> Ubah Harga
+                                                    <i class="fa-solid fa-pen me-1"></i> Ubah
                                                 </button>
                                             </td>
                                         </tr>
@@ -194,6 +243,10 @@ $listHarga = $controller->getTabelHarga($filter_toko);
                             </table>
                         </div>
                     </div>
+                </div>
+                
+                <div class="mt-3 text-muted small">
+                    Menampilkan <?php echo count($listHarga); ?> data harga.
                 </div>
 
             </div> </div>

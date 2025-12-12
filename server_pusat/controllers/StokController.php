@@ -1,27 +1,49 @@
 <?php
 // controllers/StokController.php
 
-class StokController {
+class StokController
+{
     private $db;
 
-    public function __construct($dbConnection) {
+    public function __construct($dbConnection)
+    {
         $this->db = $dbConnection;
     }
 
-    // 1. Ambil Data Stok Gudang Pusat
-    public function getStokPusat() {
-        $sql = "SELECT p.id_produk, p.kode_produk, p.nama_produk, p.satuan, p.stok_global,
-                COALESCE(SUM(s.jumlah), 0) as total_di_cabang
+    // GANTI METHOD getStokPusat DENGAN INI
+    public function getStokPusat($keyword = '', $kategori = '')
+    {
+        $sql = "SELECT p.*, 
+                (SELECT SUM(jumlah) FROM stok_toko WHERE id_produk = p.id_produk) as total_di_cabang 
                 FROM produk p
-                LEFT JOIN stok_toko s ON p.id_produk = s.id_produk
-                WHERE p.status = 'aktif'
-                GROUP BY p.id_produk
-                ORDER BY p.stok_global DESC";
-        return $this->db->query($sql)->fetchAll();
+                WHERE 1=1 ";
+
+        $params = [];
+
+        // 1. Filter Pencarian Nama / Kode
+        if (!empty($keyword)) {
+            $sql .= " AND (p.nama_produk LIKE :cari OR p.kode_produk LIKE :cari)";
+            $params[':cari'] = "%$keyword%";
+        }
+
+        // 2. Filter Kategori
+        if (!empty($kategori)) {
+            $sql .= " AND p.kategori = :kat";
+            $params[':kat'] = $kategori;
+        }
+
+        // 3. LOGIKA SORTING (Request: Distribusi dulu, baru Abjad)
+        // total_di_cabang > 0 DESC (True/1 ditaruh atas), lalu nama_produk ASC
+        $sql .= " ORDER BY (SELECT SUM(jumlah) FROM stok_toko WHERE id_produk = p.id_produk) > 0 DESC, p.nama_produk ASC";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     // 2. Ambil Riwayat Pengiriman
-    public function getRiwayat() {
+    public function getRiwayat()
+    {
         $sql = "SELECT r.*, t.nama_toko, p.nama_produk, p.kode_produk 
                 FROM riwayat_distribusi r
                 JOIN toko t ON r.id_toko = t.id_toko
@@ -31,20 +53,22 @@ class StokController {
     }
 
     // 3. Ambil Stok Per Toko
-    public function getStokPerToko($id_toko) {
+    public function getStokPerToko($id_toko)
+    {
         $query = "SELECT s.id_stok, s.jumlah, s.last_update, 
                          p.nama_produk, p.kode_produk 
                   FROM stok_toko s
                   JOIN produk p ON s.id_produk = p.id_produk
                   WHERE s.id_toko = :id
                   ORDER BY p.nama_produk ASC";
-        
+
         $stmt = $this->db->prepare($query);
         $stmt->execute([':id' => $id_toko]);
         return $stmt->fetchAll();
     }
 
-    public function getDetailSebaran($id_produk) {
+    public function getDetailSebaran($id_produk)
+    {
         $sql = "SELECT t.nama_toko, s.jumlah, s.last_update 
                 FROM stok_toko s
                 JOIN toko t ON s.id_toko = t.id_toko
@@ -56,7 +80,8 @@ class StokController {
     }
 
     // 4. PROSES DISTRIBUSI STOK (INTI LOGIKA)
-    public function distribute($id_toko, $id_produk, $jumlah) {
+    public function distribute($id_toko, $id_produk, $jumlah)
+    {
         try {
             $this->db->beginTransaction();
 
@@ -82,7 +107,7 @@ class StokController {
             $cek = $this->db->prepare("SELECT id_stok FROM stok_toko WHERE id_toko = :toko AND id_produk = :prod");
             $stmtCek = $cek; // Alias
             $stmtCek->execute([':toko' => $id_toko, ':prod' => $id_produk]);
-            
+
             if ($stmtCek->rowCount() > 0) {
                 // UPDATE
                 $sql = "UPDATE stok_toko SET jumlah = jumlah + :qty, last_update = NOW() 
@@ -112,15 +137,13 @@ class StokController {
             // E. TRIGGER UPDATE TIMESTAMP (PENTING!!!)
             // Ini memaksa produk terdeteksi "Baru Diupdate" oleh Client
             $this->db->prepare("UPDATE produk SET updated_at = NOW() WHERE id_produk = :id")
-                     ->execute([':id' => $id_produk]);
+                ->execute([':id' => $id_produk]);
 
             $this->db->commit();
             return ['status' => 'success', 'message' => "Berhasil kirim $jumlah stok ke toko. Stok pusat berkurang."];
-
         } catch (Exception $e) {
             $this->db->rollBack();
             return ['status' => 'error', 'message' => $e->getMessage()];
         }
     }
 }
-?>

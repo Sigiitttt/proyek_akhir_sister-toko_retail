@@ -1,15 +1,18 @@
 <?php
 // models/Harga.php
 
-class Harga {
+class Harga
+{
     private $db;
 
-    public function __construct($dbConnection) {
+    public function __construct($dbConnection)
+    {
         $this->db = $dbConnection;
     }
 
     // 1. Ambil Harga (Revisi Bug Filter Global)
-    public function getHargaList($id_toko_filter = null) {
+    public function getHargaList($id_toko_filter = null)
+    {
         $sql = "SELECT p.id_produk, p.kode_produk, p.nama_produk, 
                        h.harga_jual, h.tgl_berlaku, h.id_toko, t.nama_toko
                 FROM produk p
@@ -20,10 +23,10 @@ class Harga {
         // LOGIKA PEMBUATAN QUERY
         if ($id_toko_filter === 'global') {
             // Jika filter 'global', cari yang NULL. (Tidak butuh parameter :toko)
-            $sql .= " AND h.id_toko IS NULL"; 
+            $sql .= " AND h.id_toko IS NULL";
         } elseif (is_numeric($id_toko_filter) && $id_toko_filter > 0) {
             // Jika filter angka (ID Toko), cari yang match. (Butuh parameter :toko)
-            $sql .= " AND h.id_toko = :toko"; 
+            $sql .= " AND h.id_toko = :toko";
         }
 
         $sql .= " ORDER BY p.nama_produk ASC";
@@ -41,7 +44,8 @@ class Harga {
     }
 
     // 2. Set Harga Baru
-    public function setHarga($id_produk, $harga_baru, $id_toko = null) {
+    public function setHarga($id_produk, $harga_baru, $id_toko = null)
+    {
         try {
             $this->db->beginTransaction();
 
@@ -71,11 +75,9 @@ class Harga {
 
             $this->db->commit();
             return ['status' => 'success', 'message' => 'Harga berhasil diperbarui'];
-
         } catch (Exception $e) {
             $this->db->rollBack();
             return ['status' => 'error', 'message' => $e->getMessage()];
         }
     }
 }
-?>

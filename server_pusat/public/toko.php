@@ -9,22 +9,35 @@ require_once '../controllers/TokoController.php';
 $controller = new TokoController($db);
 $pesan = '';
 
-// HANDLE POST
+// HANDLE POST REQUESTS
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    
+    // 1. Simpan (Tambah/Edit)
     if (isset($_POST['action']) && $_POST['action'] == 'save') {
         $hasil = $controller->save($_POST);
     }
+    
+    // 2. Ubah Status (Aktif/Nonaktif)
     if (isset($_POST['action']) && $_POST['action'] == 'status') {
         $hasil = $controller->setStatus($_POST['id_toko'], $_POST['status_baru']);
     }
+    
+    // 3. Reset API Key
     if (isset($_POST['action']) && $_POST['action'] == 'reset_key') {
         $hasil = $controller->regenerateKey($_POST['id_toko']);
     }
 
+    // 4. Hapus Toko (BARU)
+    if (isset($_POST['action']) && $_POST['action'] == 'delete') {
+        $hasil = $controller->delete($_POST['id_toko']);
+    }
+
+    // Tampilkan Pesan Alert
     if (isset($hasil)) {
         $alertType = ($hasil['status'] == 'success') ? 'success' : 'danger';
+        $icon = ($hasil['status'] == 'success') ? 'check-circle' : 'triangle-exclamation';
         $pesan = "<div class='alert alert-$alertType alert-dismissible fade show border-0 shadow-sm'>
-                    <i class='fa-solid fa-circle-info me-2'></i>{$hasil['message']}
+                    <i class='fa-solid fa-$icon me-2'></i>{$hasil['message']}
                     <button type='button' class='btn-close' data-bs-dismiss='alert'></button>
                   </div>";
     }
@@ -51,6 +64,9 @@ $dataToko = $controller->getAll();
         .api-key-box { font-family: 'Courier New', monospace; background: #f1f3f5; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; color: #d63384; border: 1px solid #dee2e6; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; cursor: pointer; }
         .api-key-box:hover { background: #e9ecef; }
         .avatar-initial { width: 40px; height: 40px; background-color: #4e73df; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2rem; }
+        
+        .btn-action { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; transition: all 0.2s; }
+        .btn-action:hover { transform: scale(1.1); }
     </style>
 </head>
 <body>
@@ -115,7 +131,7 @@ $dataToko = $controller->getAll();
                                             <form method="POST" onsubmit="return confirm('Reset Key akan memutus koneksi toko ini. Lanjut?');" style="margin:0;">
                                                 <input type="hidden" name="action" value="reset_key">
                                                 <input type="hidden" name="id_toko" value="<?php echo $t['id_toko']; ?>">
-                                                <button class="btn btn-sm btn-light text-danger border shadow-sm rounded-circle" style="width:30px; height:30px; padding:0;" title="Reset Key">
+                                                <button class="btn btn-action btn-light text-danger border shadow-sm" title="Reset Key">
                                                     <i class="fa-solid fa-rotate"></i>
                                                 </button>
                                             </form>
@@ -135,10 +151,20 @@ $dataToko = $controller->getAll();
                                         </form>
                                     </td>
                                     <td class="text-center">
-                                        <button class="btn btn-sm btn-light text-primary border rounded-circle shadow-sm" style="width:32px; height:32px; padding:0;" 
-                                                onclick='openModalEdit(<?php echo json_encode($t); ?>)'>
-                                            <i class="fa-solid fa-pen"></i>
-                                        </button>
+                                        <div class="d-flex justify-content-center gap-1">
+                                            <button class="btn btn-action btn-light text-primary border shadow-sm" 
+                                                    onclick='openModalEdit(<?php echo json_encode($t); ?>)' title="Edit Data">
+                                                <i class="fa-solid fa-pen"></i>
+                                            </button>
+                                            
+                                            <form method="POST" onsubmit="return confirm('Yakin hapus cabang ini? Data tidak bisa dikembalikan.');" style="margin:0;">
+                                                <input type="hidden" name="action" value="delete">
+                                                <input type="hidden" name="id_toko" value="<?php echo $t['id_toko']; ?>">
+                                                <button class="btn btn-action btn-light text-danger border shadow-sm" title="Hapus Permanen">
+                                                    <i class="fa-solid fa-trash-can"></i>
+                                                </button>
+                                            </form>
+                                        </div>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -226,8 +252,8 @@ $dataToko = $controller->getAll();
         document.getElementById('inputKode').value = data.kode_toko;
         document.getElementById('inputKode').setAttribute('readonly', true); 
         document.getElementById('inputNama').value = data.nama_toko;
-        document.getElementById('inputKepala').value = data.kepala_toko; // Load data baru
-        document.getElementById('inputKontak').value = data.kontak_hp;   // Load data baru
+        document.getElementById('inputKepala').value = data.kepala_toko;
+        document.getElementById('inputKontak').value = data.kontak_hp;
         document.getElementById('inputAlamat').value = data.alamat;
         modalToko.show();
     }

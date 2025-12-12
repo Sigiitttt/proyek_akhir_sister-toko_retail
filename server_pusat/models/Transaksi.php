@@ -1,5 +1,5 @@
 <?php
-// models/Transaksi.php
+// server_pusat/models/Transaksi.php
 
 class Transaksi
 {
@@ -10,30 +10,34 @@ class Transaksi
         $this->db = $dbConnection;
     }
 
-    // [API] Simpan Transaksi dari Toko
+    // [API] Simpan Transaksi dari Toko + POTONG STOK
     public function simpanTransaksiSync($data_transaksi)
     {
         try {
             $this->db->beginTransaction();
 
+            // Siapkan Query Potong Stok (Prepared Statement agar efisien)
+            $sqlPotong = "UPDATE stok_toko 
+                          SET jumlah = jumlah - :qty 
+                          WHERE id_toko = :idtoko AND id_produk = :idprod";
+            $stmtPotong = $this->db->prepare($sqlPotong);
+
+            // Siapkan Query Detail
+            $sqlDetail = "INSERT INTO detail_transaksi (id_transaksi, id_produk, qty, harga_satuan, subtotal) 
+                          VALUES (:idtrx, :idprod, :qty, :harga, :subtotal)";
+            $stmtDetail = $this->db->prepare($sqlDetail);
+
+            // Siapkan Query Header
+            $sqlHeader = "INSERT INTO transaksi (id_transaksi, id_toko, no_struk, total_transaksi, bayar, kembalian, metode_pembayaran, kasir_id, nama_kasir, waktu_transaksi, waktu_sync) 
+                          VALUES (:id, :idtoko, :struk, :total, :bayar, :kembali, :metode, :kasir, :nama, :waktu, NOW())
+                          ON DUPLICATE KEY UPDATE waktu_sync = NOW()";
+            $stmtHeader = $this->db->prepare($sqlHeader);
+
+
             foreach ($data_transaksi as $trx) {
-                // 1. Cek duplikasi (Idempotency)
-                $check = "SELECT id_transaksi FROM transaksi WHERE id_transaksi = :id";
-                $stmtCheck = $this->db->prepare($check);
-                $stmtCheck->execute([':id' => $trx['id_transaksi']]);
-
-                if ($stmtCheck->rowCount() > 0) continue; // Skip jika sudah ada
-
-                // 2. Insert Header (10 Parameter + NOW())
-                // Total ada 11 Kolom, tapi 1 kolom (waktu_sync) pakai fungsi NOW() jadi tidak butuh parameter
-                $sqlHeader = "INSERT INTO transaksi 
-                             (id_transaksi, id_toko, no_struk, total_transaksi, bayar, kembalian, 
-                              metode_pembayaran, kasir_id, nama_kasir, waktu_transaksi, waktu_sync) 
-                             VALUES 
-                             (:id, :idtoko, :struk, :total, :bayar, :kembali, 
-                              :metode, :kasir, :nama, :waktu, NOW())";
-
-                $this->db->prepare($sqlHeader)->execute([
+                
+                // 1. Eksekusi Header
+                $stmtHeader->execute([
                     ':id'      => $trx['id_transaksi'],
                     ':idtoko'  => $trx['id_toko'],
                     ':struk'   => $trx['no_struk'],
@@ -46,28 +50,36 @@ class Transaksi
                     ':waktu'   => $trx['waktu_transaksi']
                 ]);
 
-                // 3. Insert Detail
-                $sqlDetail = "INSERT INTO detail_transaksi 
-                              (id_transaksi, id_produk, qty, harga_satuan, subtotal) 
-                              VALUES (:idtrx, :idprod, :qty, :harga, :subtotal)";
-                $stmtDetail = $this->db->prepare($sqlDetail);
+                // 2. Loop Items
+                if (isset($trx['items']) && is_array($trx['items'])) {
+                    foreach ($trx['items'] as $item) {
+                        
+                        // Insert Detail Barang
+                        $stmtDetail->execute([
+                            ':idtrx'    => $trx['id_transaksi'],
+                            ':idprod'   => $item['id_produk'],
+                            ':qty'      => $item['qty'],
+                            ':harga'    => $item['harga_satuan'],
+                            ':subtotal' => $item['subtotal']
+                        ]);
 
-                foreach ($trx['items'] as $item) {
-                    $stmtDetail->execute([
-                        ':idtrx'    => $trx['id_transaksi'],
-                        ':idprod'   => $item['id_produk'],
-                        ':qty'      => $item['qty'],
-                        ':harga'    => $item['harga_satuan'],
-                        ':subtotal' => $item['subtotal']
-                    ]);
+                        // 🔥 POTONG STOK DI SERVER PUSAT 🔥
+                        $stmtPotong->execute([
+                            ':qty'     => $item['qty'],
+                            ':idtoko'  => $trx['id_toko'], // Pastikan ID Toko benar
+                            ':idprod'  => $item['id_produk']
+                        ]);
+                    }
                 }
             }
 
             $this->db->commit();
             return true;
+
         } catch (Exception $e) {
             $this->db->rollBack();
-            throw new Exception($e->getMessage());
+            // Lempar error agar ditangkap oleh controller
+            throw new Exception("Gagal Simpan DB: " . $e->getMessage());
         }
     }
 
@@ -112,3 +124,4 @@ class Transaksi
         return $stmt->fetchAll();
     }
 }
+?>

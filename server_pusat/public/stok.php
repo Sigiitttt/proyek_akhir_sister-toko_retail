@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
               </div>";
 }
 
-// Handle AJAX Request (Untuk Detail Sebaran)
+// Handle AJAX Detail
 if (isset($_GET['ajax_detail']) && isset($_GET['id_produk'])) {
     $detail = $controller->getDetailSebaran($_GET['id_produk']);
     header('Content-Type: application/json');
@@ -27,10 +27,15 @@ if (isset($_GET['ajax_detail']) && isset($_GET['id_produk'])) {
     exit;
 }
 
-// Data Tampilan Utama
-$stokPusat = $controller->getStokPusat();
+// --- FILTER LOGIC ---
+$keyword = $_GET['cari'] ?? '';
+$filter_kategori = $_GET['kategori'] ?? '';
+
+// Ambil Data dengan Filter & Sorting Baru
+$stokPusat = $controller->getStokPusat($keyword, $filter_kategori);
 $riwayat = $controller->getRiwayat();
 $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
+$kategoriList = $db->query("SELECT DISTINCT kategori FROM produk ORDER BY kategori ASC")->fetchAll(PDO::FETCH_COLUMN);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -43,16 +48,27 @@ $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" />
+
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8f9fc; color: #5a5c69; }
         .card-stat { border: none; border-radius: 0.75rem; box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.1); background-color: #fff; }
         .page-header h4 { color: #5a5c69; font-weight: 700; }
+        
+        /* Tab Styling */
         .nav-tabs { border-bottom: 2px solid #e3e6f0; }
         .nav-tabs .nav-link { border: none; color: #858796; font-weight: 600; padding: 1rem 1.5rem; transition: 0.2s; }
         .nav-tabs .nav-link:hover { color: #4e73df; background: #f8f9fc; }
         .nav-tabs .nav-link.active { color: #4e73df; border-bottom: 3px solid #4e73df; background: transparent; }
+        
+        /* Table Styling */
         .table thead th { background-color: #f8f9fc; border-bottom: 2px solid #e3e6f0; font-size: 0.8rem; text-transform: uppercase; padding: 1rem; color: #858796; }
         .table td { vertical-align: middle; padding: 1rem; color: #5a5c69; }
+
+        /* Select2 Custom Height */
+        .select2-container .select2-selection--single { height: 38px !important; }
+        .select2-container--bootstrap-5 .select2-selection--single .select2-selection__rendered { line-height: 36px; }
     </style>
 </head>
 <body>
@@ -94,9 +110,9 @@ $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
                                 </div>
 
                                 <div class="mb-3">
-                                    <label class="form-label small fw-bold text-secondary">Pilih Produk</label>
-                                    <select name="id_produk" id="selectProduk" class="form-select border-0 shadow-sm" required onchange="cekSisaStok()">
-                                        <option value="" data-stok="0">-- Pilih Produk --</option>
+                                    <label class="form-label small fw-bold text-secondary">Pilih Produk (Bisa Diketik)</label>
+                                    <select name="id_produk" id="selectProduk" class="form-select" required onchange="cekSisaStok()">
+                                        <option value="" data-stok="0">-- Ketik Nama Produk... --</option>
                                         <?php foreach($stokPusat as $p): ?>
                                             <option value="<?php echo $p['id_produk']; ?>" 
                                                     data-stok="<?php echo $p['stok_global']; ?>"
@@ -141,9 +157,36 @@ $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
                             <div class="tab-content">
                                 
                                 <div class="tab-pane fade show active" id="tabStok">
-                                    <div class="table-responsive">
+                                    
+                                    <div class="p-3 bg-light border-bottom">
+                                        <form method="GET" class="row g-2">
+                                            <div class="col-md-4">
+                                                <input type="text" name="cari" class="form-control form-control-sm border-0" placeholder="Cari Produk..." value="<?php echo htmlspecialchars($keyword); ?>">
+                                            </div>
+                                            <div class="col-md-3">
+                                                <select name="kategori" class="form-select form-select-sm border-0" onchange="this.form.submit()">
+                                                    <option value="">📂 Semua Kategori</option>
+                                                    <?php foreach($kategoriList as $k): ?>
+                                                        <option value="<?php echo $k; ?>" <?php echo ($filter_kategori == $k) ? 'selected' : ''; ?>>
+                                                            <?php echo $k; ?>
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <button type="submit" class="btn btn-primary btn-sm w-100">Filter</button>
+                                            </div>
+                                            <?php if($keyword || $filter_kategori): ?>
+                                                <div class="col-md-2">
+                                                    <a href="stok.php" class="btn btn-outline-secondary btn-sm w-100">Reset</a>
+                                                </div>
+                                            <?php endif; ?>
+                                        </form>
+                                    </div>
+
+                                    <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
                                         <table class="table table-hover align-middle mb-0">
-                                            <thead>
+                                            <thead class="sticky-top">
                                                 <tr>
                                                     <th class="ps-4">Nama Produk</th>
                                                     <th class="text-center">Stok Pusat</th>
@@ -153,40 +196,51 @@ $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                <?php foreach($stokPusat as $s): ?>
-                                                <tr>
-                                                    <td class="ps-4">
-                                                        <div class="fw-bold text-dark"><?php echo $s['nama_produk']; ?></div>
-                                                        <small class="text-muted font-monospace text-primary"><?php echo $s['kode_produk']; ?></small>
-                                                    </td>
-                                                    <td class="text-center">
-                                                        <span class="badge bg-primary bg-opacity-10 text-primary border border-primary px-3 rounded-pill fs-6">
-                                                            <?php echo number_format($s['stok_global']); ?>
-                                                        </span>
-                                                    </td>
-                                                    <td class="text-center">
-                                                        <span class="fw-bold text-secondary"><?php echo number_format($s['total_di_cabang']); ?></span>
-                                                        <small class="text-muted"><?php echo $s['satuan']; ?></small>
-                                                    </td>
-                                                    <td class="text-center">
-                                                        <?php if($s['stok_global'] > 10): ?>
-                                                            <span class="badge bg-success rounded-pill">Aman</span>
-                                                        <?php elseif($s['stok_global'] > 0): ?>
-                                                            <span class="badge bg-warning text-dark rounded-pill">Menipis</span>
-                                                        <?php else: ?>
-                                                            <span class="badge bg-danger rounded-pill">Habis</span>
-                                                        <?php endif; ?>
-                                                    </td>
-                                                    <td class="text-center">
-                                                        <button class="btn btn-sm btn-light text-primary border rounded-circle shadow-sm"
-                                                                style="width:32px; height:32px; padding:0;"
-                                                                onclick="showDetail(<?php echo $s['id_produk']; ?>, '<?php echo addslashes($s['nama_produk']); ?>')"
-                                                                title="Lihat Sebaran Stok">
-                                                            <i class="fa-solid fa-eye"></i>
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                                <?php endforeach; ?>
+                                                <?php if(empty($stokPusat)): ?>
+                                                    <tr><td colspan="5" class="text-center py-5 text-muted">Produk tidak ditemukan.</td></tr>
+                                                <?php else: ?>
+                                                    <?php foreach($stokPusat as $s): ?>
+                                                    <tr>
+                                                        <td class="ps-4">
+                                                            <div class="fw-bold text-dark"><?php echo $s['nama_produk']; ?></div>
+                                                            <div class="d-flex gap-2">
+                                                                <small class="text-muted font-monospace"><?php echo $s['kode_produk']; ?></small>
+                                                                <span class="badge bg-light text-secondary border px-1" style="font-size:0.6rem"><?php echo $s['kategori']; ?></span>
+                                                            </div>
+                                                        </td>
+                                                        <td class="text-center">
+                                                            <span class="badge bg-primary bg-opacity-10 text-primary border border-primary px-3 rounded-pill fs-6">
+                                                                <?php echo number_format($s['stok_global']); ?>
+                                                            </span>
+                                                        </td>
+                                                        <td class="text-center">
+                                                            <?php if($s['total_di_cabang'] > 0): ?>
+                                                                <span class="fw-bold text-success"> <?php echo number_format($s['total_di_cabang']); ?></span>
+                                                            <?php else: ?>
+                                                                <span class="text-muted">-</span>
+                                                            <?php endif; ?>
+                                                            <small class="text-muted ms-1"><?php echo $s['satuan']; ?></small>
+                                                        </td>
+                                                        <td class="text-center">
+                                                            <?php if($s['stok_global'] > 10): ?>
+                                                                <span class="badge bg-success bg-opacity-10 text-success rounded-pill">Aman</span>
+                                                            <?php elseif($s['stok_global'] > 0): ?>
+                                                                <span class="badge bg-warning text-dark rounded-pill">Menipis</span>
+                                                            <?php else: ?>
+                                                                <span class="badge bg-danger rounded-pill">Habis</span>
+                                                            <?php endif; ?>
+                                                        </td>
+                                                        <td class="text-center">
+                                                            <button class="btn btn-sm btn-light text-primary border rounded-circle shadow-sm"
+                                                                    style="width:32px; height:32px; padding:0;"
+                                                                    onclick="showDetail(<?php echo $s['id_produk']; ?>, '<?php echo addslashes($s['nama_produk']); ?>')"
+                                                                    title="Lihat Sebaran Stok">
+                                                                <i class="fa-solid fa-eye"></i>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                    <?php endforeach; ?>
+                                                <?php endif; ?>
                                             </tbody>
                                         </table>
                                     </div>
@@ -195,7 +249,7 @@ $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
                                 <div class="tab-pane fade" id="tabRiwayat">
                                     <div class="table-responsive">
                                         <table class="table table-hover align-middle mb-0">
-                                            <thead>
+                                            <thead class="table-light">
                                                 <tr>
                                                     <th class="ps-4">Tanggal</th>
                                                     <th>Ke Cabang</th>
@@ -232,7 +286,8 @@ $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
                     </div>
                 </div>
 
-            </div> </div>
+            </div> 
+        </div>
     </div>
 </div>
 
@@ -252,8 +307,7 @@ $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
                                 <th class="text-end pe-4">Sisa Stok</th>
                             </tr>
                         </thead>
-                        <tbody id="modalContent">
-                            </tbody>
+                        <tbody id="modalContent"></tbody>
                     </table>
                 </div>
                 <div id="modalLoading" class="text-center py-4">
@@ -270,8 +324,26 @@ $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
     </div>
 </div>
 
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
 <script>
+    // 1. Inisialisasi Select2 (Pencarian Dropdown)
+    $(document).ready(function() {
+        $('#selectProduk').select2({
+            theme: 'bootstrap-5',
+            placeholder: '-- Ketik Nama Produk... --',
+            allowClear: true,
+            width: '100%'
+        });
+
+        // Event saat Select2 berubah value-nya
+        $('#selectProduk').on('select2:select', function (e) {
+            cekSisaStok(); // Panggil fungsi cek stok manual
+        });
+    });
+
     const modalDetail = new bootstrap.Modal(document.getElementById('modalDetail'));
     const modalContent = document.getElementById('modalContent');
     const modalLoading = document.getElementById('modalLoading');
@@ -281,11 +353,13 @@ $tokoList = $db->query("SELECT * FROM toko WHERE is_active=1")->fetchAll();
         const select = document.getElementById('selectProduk');
         const display = document.getElementById('displayStok');
         
-        const selectedOption = select.options[select.selectedIndex];
-        const stok = selectedOption.getAttribute('data-stok');
-        const satuan = selectedOption.getAttribute('data-satuan');
+        // Ambil data dari option yang terpilih (Logic Manual karena Select2 menyembunyikan select asli)
+        // Kita gunakan jQuery untuk ambil data dari Select2
+        const selectedData = $('#selectProduk').find(':selected');
+        const stok = selectedData.data('stok');
+        const satuan = selectedData.data('satuan');
         
-        if (stok) {
+        if (stok !== undefined) {
             display.innerText = stok + ' ' + satuan;
             if (parseInt(stok) === 0) {
                 display.classList.add('text-danger');
